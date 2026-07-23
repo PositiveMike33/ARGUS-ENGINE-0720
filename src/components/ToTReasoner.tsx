@@ -28,7 +28,9 @@ import {
   List,
   Percent,
   Brain,
-  Database
+  Database,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 
 interface ToTReasonerProps {
@@ -84,6 +86,7 @@ export const ToTReasoner: React.FC<ToTReasonerProps> = ({
 
   // Backtracking states & synchronization
   const [backtrackedBranches, setBacktrackedBranches] = useState<string[]>([]);
+  const [expandedBranches, setExpandedBranches] = useState<Record<string, boolean>>({});
   const [currentResultId, setCurrentResultId] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<'branches' | 'agents' | 'riskSummary'>('branches');
 
@@ -1385,16 +1388,24 @@ export const ToTReasoner: React.FC<ToTReasonerProps> = ({
                     const scoreWidth = `${branch.evaluationScore}%`;
                     const uncertaintyWidth = `${branch.uncertainty}%`;
                     
+                    const isExpanded = !!expandedBranches[branchId];
+
                     return (
                       <div 
                         key={branch.id || index}
-                        onClick={() => openQuantumModal(branch)}
+                        onClick={(e) => {
+                          if ((e.target as HTMLElement).closest('.stop-propagation')) return;
+                          setExpandedBranches(prev => ({
+                            ...prev,
+                            [branchId]: !prev[branchId]
+                          }));
+                        }}
                         className={`p-4 rounded-lg border transition-all duration-300 flex flex-col justify-between relative overflow-hidden cursor-pointer group ${
                           isB 
                             ? 'bg-red-950/10 border-red-900/50 opacity-60 shadow-[inset_0_0_12px_rgba(239,68,68,0.05)] hover:border-red-800/80'
                             : 'bg-slate-950 border-slate-800/80 hover:border-indigo-500/85 hover:shadow-[0_0_15px_rgba(99,102,241,0.15)]'
                         }`}
-                        title="Cliquer pour décoder l'entropie quantique de cette branche"
+                        title={isExpanded ? "Cliquer pour condenser la branche" : "Cliquer pour étendre les détails complets de la branche"}
                       >
                         {isB && (
                           <div className="absolute top-0 right-0 bg-red-600/90 text-white font-mono text-[7px] font-bold px-1.5 py-0.5 uppercase tracking-wider rounded-bl">
@@ -1403,17 +1414,36 @@ export const ToTReasoner: React.FC<ToTReasonerProps> = ({
                         )}
                         <div>
                           {/* Title */}
-                          <div className="flex items-center justify-between mb-1">
+                          <div className="flex items-center justify-between mb-1.5">
                             <span className={`font-display font-semibold text-xs ${isB ? 'text-red-400 line-through' : 'text-slate-200 group-hover:text-white transition-colors'}`}>
                               {branch.name}
                             </span>
-                            <span className="text-[10px] font-mono text-indigo-400 font-semibold bg-indigo-950/40 px-1.5 py-0.5 rounded border border-indigo-900/10 group-hover:border-indigo-800/30 transition-all">
-                              B-0{index + 1}
-                            </span>
+                            <div className="flex items-center gap-1.5 stop-propagation">
+                              <span className="text-[10px] font-mono text-indigo-400 font-semibold bg-indigo-950/40 px-1.5 py-0.5 rounded border border-indigo-900/10 group-hover:border-indigo-800/30 transition-all">
+                                B-0{index + 1}
+                              </span>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setExpandedBranches(prev => ({
+                                    ...prev,
+                                    [branchId]: !prev[branchId]
+                                  }));
+                                }}
+                                className="p-0.5 hover:bg-slate-900 rounded text-slate-500 hover:text-slate-300 transition-colors cursor-pointer"
+                                title={isExpanded ? "Condenser" : "Étendre"}
+                              >
+                                {isExpanded ? (
+                                  <ChevronUp className="w-4 h-4 text-indigo-400" />
+                                ) : (
+                                  <ChevronDown className="w-4 h-4 text-slate-400" />
+                                )}
+                              </button>
+                            </div>
                           </div>
 
                           {/* Description */}
-                          <p className="text-xs text-slate-400 leading-normal mb-3 font-sans">
+                          <p className={`text-xs text-slate-400 leading-normal mb-3 font-sans transition-all ${isExpanded ? '' : 'line-clamp-2'}`}>
                             {branch.description}
                           </p>
 
@@ -1445,64 +1475,81 @@ export const ToTReasoner: React.FC<ToTReasonerProps> = ({
                             </div>
                           </div>
 
-                          {/* Cascading Risks */}
-                          <div className="mt-3 pt-3 border-t border-slate-900 space-y-1.5">
-                            <span className="text-[10px] font-mono text-red-400 uppercase flex items-center gap-1">
-                              <Flame className="w-3 h-3 text-red-500 animate-pulse" />
-                              <span>RISQUES EN CASCADE</span>
-                            </span>
-                            <ul className="space-y-1">
-                              {branch.cascadingRisks?.map((risk, idx) => (
-                                <li key={idx} className="text-[10px] text-slate-400 font-sans flex items-start gap-1">
-                                  <span className="text-red-500/85 mt-0.5">•</span>
-                                  <span>{risk}</span>
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
+                          {isExpanded && (
+                            <div className="space-y-4 pt-3 border-t border-slate-900/60 animate-fade-in">
+                              {/* Cascading Risks */}
+                              <div className="space-y-1.5">
+                                <span className="text-[10px] font-mono text-red-400 uppercase flex items-center gap-1">
+                                  <Flame className="w-3 h-3 text-red-500 animate-pulse" />
+                                  <span>RISQUES EN CASCADE</span>
+                                </span>
+                                <ul className="space-y-1">
+                                  {branch.cascadingRisks?.map((risk, idx) => (
+                                    <li key={idx} className="text-[10px] text-slate-400 font-sans flex items-start gap-1">
+                                      <span className="text-red-500/85 mt-0.5">•</span>
+                                      <span>{risk}</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
 
-                          {/* Interactive D3 Entropy Distribution Graph */}
-                          <div className="mt-4">
-                            <BranchEntropyD3Chart 
-                              branchId={branchId}
-                              uncertainty={branch.uncertainty}
-                              evaluationScore={branch.evaluationScore}
-                            />
-                          </div>
+                              {/* Interactive D3 Entropy Distribution Graph */}
+                              <div>
+                                <BranchEntropyD3Chart 
+                                  branchId={branchId}
+                                  uncertainty={branch.uncertainty}
+                                  evaluationScore={branch.evaluationScore}
+                                />
+                              </div>
 
-                          {/* Critics Summary Badge */}
-                          {branch.critics && branch.critics.length > 0 && (
-                            <div className="mt-3 pt-2.5 border-t border-slate-900 flex items-center justify-between text-[10px] font-mono">
-                              <span className="text-slate-500 uppercase flex items-center gap-1">
-                                <Cpu className="w-3.5 h-3.5 text-emerald-500 animate-pulse" />
-                                <span>CRITIQUES IA :</span>
-                              </span>
-                              <span className={`px-2 py-0.5 rounded font-bold uppercase text-[9px] border ${
-                                branch.critics.reduce((acc, c) => acc + c.validityScore, 0) / branch.critics.length >= 85
-                                  ? 'bg-emerald-950/50 text-emerald-400 border-emerald-800/40'
-                                  : 'bg-yellow-950/50 text-yellow-400 border-yellow-800/40'
-                              }`}>
-                                {branch.critics.length} CRITIQUES • VALIDITÉ : {Math.round(branch.critics.reduce((acc, c) => acc + c.validityScore, 0) / branch.critics.length)}%
-                              </span>
+                              {/* Critics Summary Badge */}
+                              {branch.critics && branch.critics.length > 0 && (
+                                <div className="pt-2.5 border-t border-slate-900/60 flex items-center justify-between text-[10px] font-mono">
+                                  <span className="text-slate-500 uppercase flex items-center gap-1">
+                                    <Cpu className="w-3.5 h-3.5 text-emerald-500 animate-pulse" />
+                                    <span>CRITIQUES IA :</span>
+                                  </span>
+                                  <span className={`px-2 py-0.5 rounded font-bold uppercase text-[9px] border ${
+                                    branch.critics.reduce((acc, c) => acc + c.validityScore, 0) / branch.critics.length >= 85
+                                      ? 'bg-emerald-950/50 text-emerald-400 border-emerald-800/40'
+                                      : 'bg-yellow-950/50 text-yellow-400 border-yellow-800/40'
+                                  }`}>
+                                    {branch.critics.length} CRITIQUES • VALIDITÉ : {Math.round(branch.critics.reduce((acc, c) => acc + c.validityScore, 0) / branch.critics.length)}%
+                                  </span>
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>
 
-                        {/* Direct Recommendation with Entropy indicator */}
-                        <div className="mt-4 p-2 bg-indigo-950/20 border border-indigo-900/30 rounded text-[11px] text-indigo-300 font-mono transition-colors group-hover:bg-indigo-950/40 group-hover:border-indigo-800/50">
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="text-indigo-400 text-[9px] uppercase font-bold">Directive :</span>
-                            <span className="text-[9px] text-indigo-400 font-bold group-hover:text-indigo-300 flex items-center gap-1 transition-colors">
-                              <Layers className="w-3 h-3 text-indigo-400" />
-                              <span>ENTROPIE QUANTIQUE</span>
-                            </span>
+                        {/* Interactive Footer or Direct Recommendation */}
+                        {!isExpanded ? (
+                          <div className="mt-3 pt-2 border-t border-slate-900/60 text-center text-[9.5px] font-mono text-indigo-400 font-bold group-hover:text-indigo-300 transition-colors uppercase tracking-wider flex items-center justify-center gap-1.5">
+                            <span>Étendre la réflexion</span>
+                            <ChevronDown className="w-3.5 h-3.5 animate-bounce" style={{ animationDuration: '2.5s' }} />
                           </div>
-                          <p className="line-clamp-2 leading-relaxed">{branch.recommendation}</p>
-                          <div className="mt-2 text-center text-[9px] text-indigo-400 group-hover:text-indigo-300 font-bold uppercase tracking-wider border-t border-indigo-900/20 pt-1.5 flex items-center justify-center gap-1.5">
-                            <span>Décoder l'Entropie Avancée</span>
-                            <span className="transition-transform group-hover:translate-x-0.5">➔</span>
+                        ) : (
+                          <div 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openQuantumModal(branch);
+                            }}
+                            className="stop-propagation mt-4 p-2 bg-indigo-950/20 border border-indigo-900/30 rounded text-[11px] text-indigo-300 font-mono transition-all hover:bg-indigo-950/40 hover:border-indigo-800/50 cursor-pointer"
+                          >
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="text-indigo-400 text-[9px] uppercase font-bold">Directive :</span>
+                              <span className="text-[9px] text-indigo-400 font-bold hover:text-indigo-300 flex items-center gap-1 transition-colors">
+                                <Layers className="w-3 h-3 text-indigo-400" />
+                                <span>ENTROPIE QUANTIQUE</span>
+                              </span>
+                            </div>
+                            <p className="line-clamp-2 leading-relaxed">{branch.recommendation}</p>
+                            <div className="mt-2 text-center text-[9px] text-indigo-400 hover:text-indigo-300 font-bold uppercase tracking-wider border-t border-indigo-900/20 pt-1.5 flex items-center justify-center gap-1.5">
+                              <span>Décoder l'Entropie Avancée</span>
+                              <span className="transition-transform group-hover:translate-x-0.5">➔</span>
+                            </div>
                           </div>
-                        </div>
+                        )}
                       </div>
                     );
                   })}

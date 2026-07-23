@@ -234,6 +234,7 @@ interface SimBus {
   speed: number;
   occupancy: number;
   speedKmh: number;
+  isLoop?: boolean;
 }
 
 interface SimFlight {
@@ -317,16 +318,26 @@ const BUS_10_ROUTE: SimRouteNode[] = [
 
 // Bus 94 d'Iberville Nord/Sud route (D'Iberville)
 const BUS_94_ROUTE: SimRouteNode[] = [
+  // Direction NORD: Rue Frontenac
   { lat: 45.5273, lng: -73.5432 }, // Métro Frontenac
-  { lat: 45.5292, lng: -73.5455 }, // Frontenac / Hochelaga (Orthogonal street-grid turn corner)
-  { lat: 45.5289, lng: -73.5460 }, // Iberville / Hochelaga (Orthogonal street-grid turn corner)
-  { lat: 45.5350, lng: -73.5535 }, // Iberville / Sherbrooke (Perfect parallel avenue to Papineau)
-  { lat: 45.5420, lng: -73.5625 }, // Iberville / Mont-Royal (Perfect parallel avenue to Papineau)
-  { lat: 45.5490, lng: -73.5715 }, // Iberville / Rosemont (Perfect parallel avenue to Papineau)
-  { lat: 45.5570, lng: -73.5825 }, // Iberville / Jean-Talon (Perfect parallel avenue to Papineau)
-  { lat: 45.5710, lng: -73.6015 }, // Iberville / Jarry (Perfect parallel avenue to Papineau)
-  { lat: 45.5660, lng: -73.5945 }, // Iberville / Crémazie (Perfect parallel avenue to Papineau)
-  { lat: 45.5583, lng: -73.6007 }  // Émile-Journault / Cirque du Soleil (Orthogonal grid transition)
+  { lat: 45.5292, lng: -73.5455 }, // Frontenac / Hochelaga
+  { lat: 45.5353, lng: -73.5530 }, // Frontenac / Sherbrooke
+  { lat: 45.5423, lng: -73.5620 }, // Frontenac / Mont-Royal
+  { lat: 45.5493, lng: -73.5710 }, // Frontenac / Rosemont
+  { lat: 45.5573, lng: -73.5820 }, // Frontenac / Jean-Talon
+  { lat: 45.5713, lng: -73.6010 }, // Frontenac / Jarry
+  { lat: 45.5663, lng: -73.5940 }, // Frontenac / Crémazie
+  { lat: 45.5583, lng: -73.6007 }, // Émile-Journault / Cirque du Soleil
+  
+  // Direction SUD: Rue d'Iberville
+  { lat: 45.5660, lng: -73.5945 }, // Iberville / Crémazie
+  { lat: 45.5710, lng: -73.6015 }, // Iberville / Jarry
+  { lat: 45.5570, lng: -73.5825 }, // Iberville / Jean-Talon
+  { lat: 45.5490, lng: -73.5715 }, // Iberville / Rosemont
+  { lat: 45.5420, lng: -73.5625 }, // Iberville / Mont-Royal
+  { lat: 45.5350, lng: -73.5535 }, // Iberville / Sherbrooke
+  { lat: 45.5289, lng: -73.5460 }, // Iberville / Hochelaga
+  { lat: 45.5273, lng: -73.5432 }  // Métro Frontenac
 ];
 
 // Bus 45 Papineau Nord/Sud route (Papineau)
@@ -581,8 +592,8 @@ export function STMIncidentMap({ feeds, selectedFeed, onSelectFeed }: STMInciden
     { id: 'B-10S', routeId: '10', routeName: '10 De Lorimier Sud (Crémazie ⇄ Papineau)', points: BUS_10_ROUTE, currentIdx: 4, dir: -1, progress: 0, speed: 0.04, occupancy: 52, speedKmh: 31 },
     
     // Ligne 94 d'Iberville (Frontenac ⇄ Cirque du Soleil)
-    { id: 'B-94N', routeId: '94', routeName: '94 d\'Iberville Nord (Frontenac ⇄ Cirque du Soleil)', points: BUS_94_ROUTE, currentIdx: 1, dir: 1, progress: 0, speed: 0.05, occupancy: 48, speedKmh: 34 },
-    { id: 'B-94S', routeId: '94', routeName: '94 d\'Iberville Sud (Cirque du Soleil ⇄ Frontenac)', points: BUS_94_ROUTE, currentIdx: 3, dir: -1, progress: 0, speed: 0.04, occupancy: 61, speedKmh: 29 },
+    { id: 'B-94N', routeId: '94', routeName: '94 d\'Iberville Nord (Frontenac ⇄ Cirque du Soleil)', points: BUS_94_ROUTE, currentIdx: 1, dir: 1, progress: 0, speed: 0.05, occupancy: 48, speedKmh: 34, isLoop: true },
+    { id: 'B-94S', routeId: '94', routeName: '94 d\'Iberville Sud (Cirque du Soleil ⇄ Frontenac)', points: BUS_94_ROUTE, currentIdx: 11, dir: 1, progress: 0, speed: 0.04, occupancy: 61, speedKmh: 29, isLoop: true },
     
     // Ligne 45 Papineau (Métro Papineau ⇄ St-Firmin/Gouin)
     { id: 'B-45N', routeId: '45', routeName: '45 Papineau Nord (Papineau ⇄ St-Firmin/Gouin)', points: BUS_45_ROUTE, currentIdx: 1, dir: 1, progress: 0, speed: 0.06, occupancy: 70, speedKmh: 40 },
@@ -665,6 +676,14 @@ export function STMIncidentMap({ feeds, selectedFeed, onSelectFeed }: STMInciden
         if (nextProgress >= 1.0) {
           const nextIdx = bus.currentIdx + bus.dir;
           if (nextIdx < 0 || nextIdx >= bus.points.length - 1) {
+            if (bus.isLoop) {
+              return {
+                ...bus,
+                currentIdx: 0,
+                progress: 0,
+                speedKmh: Math.floor(25 + Math.random() * 20)
+              };
+            }
             return {
               ...bus,
               currentIdx: nextIdx < 0 ? 0 : bus.points.length - 2,

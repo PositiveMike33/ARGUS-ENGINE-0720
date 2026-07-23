@@ -1,0 +1,49 @@
+--- server.ts
++++ server.ts
+@@ -1935,6 +1935,46 @@
+   }
+ });
+ 
++app.post('/api/assistant/summarize-emails', optionalAuth, async (req: any, res) => {
++  try {
++    const { emails } = req.body;
++    if (!emails || !Array.isArray(emails)) {
++      return res.status(400).json({ error: 'Mails non fournis' });
++    }
++    const apiKey = process.env.GEMINI_API_KEY;
++    if (!apiKey) return res.status(500).json({ error: 'GEMINI_API_KEY non configurée' });
++    const ai = new GoogleGenAI({ apiKey });
++    const prompt = `Résume les courriels suivants sous forme de tâches exploitables (To-Do list).\n\nCourriels:\n${JSON.stringify(emails, null, 2)}\n\nFormate ta réponse de manière concise en liste de tâches.`;
++    const response = await ai.models.generateContent({
++      model: 'gemini-3.5-flash',
++      contents: prompt
++    });
++    res.json({ tasks: response.text });
++  } catch (error) {
++    console.error('Email sum error:', error);
++    res.status(500).json({ error: 'Erreur génération' });
++  }
++});
++
++app.post('/api/assistant/check-compliance', optionalAuth, async (req: any, res) => {
++  try {
++    const { text } = req.body;
++    if (!text) return res.status(400).json({ error: 'Texte manquant' });
++    const apiKey = process.env.GEMINI_API_KEY;
++    if (!apiKey) return res.status(500).json({ error: 'GEMINI_API_KEY non configurée' });
++    const ai = new GoogleGenAI({ apiKey });
++    const prompt = `En tant que directeur marketing expert, vérifie si ce texte est conforme à la ligne éditoriale d'une marque de tech moderne, sérieuse et innovante (style Apple/Stripe).\n\nTexte:\n"${text}"\n\nDonne une évaluation sur 100, liste les forces, faiblesses et une proposition d'amélioration.`;
++    const response = await ai.models.generateContent({
++      model: 'gemini-3.5-flash',
++      contents: prompt
++    });
++    res.json({ analysis: response.text });
++  } catch (error) {
++    console.error('Compliance check error:', error);
++    res.status(500).json({ error: 'Erreur génération' });
++  }
++});
++
+ // ==========================================
+ // 12. Fallback pour le routing SPA
+ // ==========================================

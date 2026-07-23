@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { APIIntegrationLog } from '../types';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -93,6 +93,19 @@ export const EliteMonetization: React.FC<EliteMonetizationProps> = ({
   const [apiKeyVisible, setApiKeyVisible] = useState<boolean>(false);
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [stripeCeiling, setStripeCeiling] = useState<number>(350000); // 350k tokens default ceiling
+  const [autoRefreshLogs, setAutoRefreshLogs] = useState<boolean>(false);
+
+  useEffect(() => {
+    let interval: NodeJS.Timeout | null = null;
+    if (autoRefreshLogs) {
+      interval = setInterval(() => {
+        onRefreshLogs();
+      }, 30000);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [autoRefreshLogs, onRefreshLogs]);
 
   // Estimate tokens from log size (e.g., "12.34 KB" -> 12.34)
   const estimateTokensForLog = (log: APIIntegrationLog) => {
@@ -320,6 +333,16 @@ export const EliteMonetization: React.FC<EliteMonetizationProps> = ({
                     <Download className="w-3.5 h-3.5" />
                     <span>Exporter les logs (CSV)</span>
                   </button>
+                  <div className="flex items-center gap-1 border border-emerald-900/60 bg-emerald-950/25 rounded px-2 py-1" title="Actualisation auto (30s)">
+                    <label htmlFor="auto-refresh-logs" className="text-[10px] font-mono text-emerald-400 cursor-pointer">Auto</label>
+                    <input 
+                      type="checkbox" 
+                      id="auto-refresh-logs" 
+                      checked={autoRefreshLogs} 
+                      onChange={(e) => setAutoRefreshLogs(e.target.checked)} 
+                      className="accent-emerald-500 w-3 h-3 cursor-pointer" 
+                    />
+                  </div>
                   <button 
                     onClick={onRefreshLogs}
                     disabled={isLoadingLogs}

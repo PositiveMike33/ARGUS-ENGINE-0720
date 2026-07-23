@@ -8,5 +8,5 @@ const app = !getApps().length ? initializeApp({
 }) : getApps()[0];
 
 export const adminAuth = getAuth(app);
-export const adminDb = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+export const adminDb = getFirestore(app, (firebaseConfig as any).firestoreDatabaseId);
 export { getApps };

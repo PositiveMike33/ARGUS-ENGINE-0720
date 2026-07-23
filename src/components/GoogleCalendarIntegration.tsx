@@ -296,7 +296,9 @@ export const GoogleCalendarIntegration: React.FC<GoogleCalendarIntegrationProps>
       }
     } catch (err: any) {
       console.error('Failed to link Calendar credentials: ', err);
-      if (err.code === 'auth/popup-blocked' || err.message?.includes('popup-blocked')) {
+      if (err.code === 'auth/cancelled-popup-request' || err.message?.includes('cancelled-popup-request') || err.message === 'auth/cancelled-popup-request') {
+        // Ignorer l'annulation
+      } else if (err.code === 'auth/popup-blocked' || err.message?.includes('popup-blocked')) {
         setErrorMsg('Le bloqueur de popups de votre navigateur a bloqué la fenêtre d\'authentification Google (car l\'application s\'exécute dans l\'iframe d\'AI Studio). Veuillez autoriser les popups pour ce site dans votre navigateur ou ouvrez l\'application dans un nouvel onglet via le bouton en haut à droite d\'AI Studio pour contourner les restrictions d\'iframe.');
       } else {
         setErrorMsg(err.message || 'Connexion refusée ou bloquée par l\'explorateur.');

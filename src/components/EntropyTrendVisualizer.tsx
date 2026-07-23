@@ -13,7 +13,10 @@ import {
   YAxis, 
   Tooltip, 
   CartesianGrid, 
-  ReferenceLine 
+  ReferenceLine,
+  LineChart,
+  Line,
+  Legend
 } from 'recharts';
 import { Activity, TrendingDown } from 'lucide-react';
 import * as d3 from 'd3';
@@ -41,6 +44,8 @@ export const EntropyTrendVisualizer: React.FC<EntropyTrendVisualizerProps> = ({
     const saved = localStorage.getItem('argus_entropy_alert_threshold');
     return saved ? parseFloat(saved) : 0.45;
   });
+
+  const [activeTab, setActiveTab] = useState<'convergence' | 'stress24h'>('convergence');
 
   useEffect(() => {
     localStorage.setItem('argus_entropy_alert_threshold', entropyAlertThreshold.toString());
@@ -162,6 +167,87 @@ export const EntropyTrendVisualizer: React.FC<EntropyTrendVisualizerProps> = ({
     return finalPoints;
   }, [selectedResult, archive]);
 
+  // Generate 24 hours of system stress history for identifying stress correlations
+  const dailyStressData = useMemo(() => {
+    const dataPoints = [];
+    const now = new Date();
+    
+    // Create 24 hourly bins, starting from 23 hours ago up to now
+    for (let i = 23; i >= 0; i--) {
+      const binTime = new Date(now.getTime() - i * 60 * 60 * 1000);
+      const binHour = binTime.getHours();
+      const label = `${String(binHour).padStart(2, '0')}:00`;
+      
+      // Filter archive items that fall into this hour slot
+      const hourStart = new Date(binTime.getTime());
+      hourStart.setMinutes(0, 0, 0);
+      const hourEnd = new Date(binTime.getTime());
+      hourEnd.setMinutes(59, 59, 999);
+      
+      const matchingItems = archive.filter(item => {
+        const itemTime = new Date(item.timestamp);
+        return itemTime >= hourStart && itemTime <= hourEnd;
+      });
+      
+      let entropy = 0;
+      let stressIndex = 0;
+      let incidentCount = matchingItems.length;
+      let description = "Flux système nominal";
+      let isReal = matchingItems.length > 0;
+      
+      if (isReal) {
+        const totalEntropy = matchingItems.reduce((sum, item) => sum + item.entropyScore, 0);
+        entropy = parseFloat((totalEntropy / matchingItems.length).toFixed(3));
+        
+        // Calculate system stress index based on entropy, item counts, and severities derived from entropy thresholds
+        const hasHighEntropy = matchingItems.some(item => item.entropyScore > 0.5);
+        const hasMediumEntropy = matchingItems.some(item => item.entropyScore > 0.3);
+        const maxSeverity = hasHighEntropy ? 'high' : hasMediumEntropy ? 'medium' : 'low';
+        
+        const severityFactor = maxSeverity === 'high' ? 1.5 : maxSeverity === 'medium' ? 1.25 : 1.0;
+        stressIndex = parseFloat(Math.min(1.0, entropy * severityFactor + (incidentCount * 0.05)).toFixed(3));
+        description = `${incidentCount} analyse${incidentCount > 1 ? 's' : ''} ToT active${incidentCount > 1 ? 's' : ''}`;
+      } else {
+        // Generate realistic background system stress based on typical transit peak hours
+        // Peaks at morning commute (8:00 - 9:00) and evening commute (17:00 - 18:00)
+        let baseNoise = 0.12 + Math.sin(binHour / 3) * 0.04 + (Math.random() * 0.05);
+        
+        if (binHour >= 7 && binHour <= 9) {
+          // Morning Peak
+          baseNoise += 0.35 + (Math.random() * 0.15);
+          description = "Charge de pointe matinale (Simulée)";
+        } else if (binHour >= 16 && binHour <= 18) {
+          // Evening Peak
+          baseNoise += 0.40 + (Math.random() * 0.15);
+          description = "Charge de pointe de fin de journée (Simulée)";
+        } else if (binHour >= 23 || binHour <= 5) {
+          // Night maintenance
+          baseNoise = 0.08 + (Math.random() * 0.04);
+          description = "Maintenance préventive nocturne (Simulée)";
+        } else {
+          // Mid-day normal operations
+          baseNoise += 0.08 + (Math.random() * 0.08);
+          description = "Trafic de mi-journée fluide (Simulé)";
+        }
+        
+        entropy = parseFloat(Math.min(0.95, Math.max(0.05, baseNoise)).toFixed(3));
+        stressIndex = parseFloat(Math.min(0.95, entropy * 1.1).toFixed(3));
+      }
+      
+      dataPoints.push({
+        label,
+        timestamp: binTime.toISOString(),
+        entropy,
+        stressIndex,
+        incidentCount,
+        description,
+        isReal
+      });
+    }
+    
+    return dataPoints;
+  }, [archive]);
+
   // Overall statistics for display
   const stats = useMemo(() => {
     if (chartData.length === 0) return { current: 0, delta: 0, status: 'stable' };
@@ -232,9 +318,11 @@ export const EntropyTrendVisualizer: React.FC<EntropyTrendVisualizerProps> = ({
     const resizeObserver = new ResizeObserver((entries) => {
       if (!entries || entries.length === 0) return;
       const { width, height } = entries[0].contentRect;
-      setDimensions({ 
-        width: width || 300, 
-        height: height || 180 
+      setDimensions(prev => {
+        const newWidth = width || 300;
+        const newHeight = height || 180;
+        if (prev.width === newWidth && prev.height === newHeight) return prev;
+        return { width: newWidth, height: newHeight };
       });
     });
 
@@ -522,125 +610,279 @@ export const EntropyTrendVisualizer: React.FC<EntropyTrendVisualizerProps> = ({
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-        {/* Left column: Entropy Progression (Recharts) */}
+        {/* Left column: Entropy Progression & 24h Stress History (Recharts) */}
         <div className="space-y-2 border-b xl:border-b-0 xl:border-r border-slate-800/40 pb-5 xl:pb-0 xl:pr-6">
-          <h4 className="text-[10px] font-mono text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
-            Évolution de l'Entropie (Recharts)
-          </h4>
+          <div className="flex items-center justify-between border-b border-slate-800/60 pb-1.5 mb-2">
+            <h4 className="text-[10px] font-mono text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+              <span className={`w-1.5 h-1.5 rounded-full ${activeTab === 'convergence' ? 'bg-indigo-500' : 'bg-pink-500 animate-pulse'}`} />
+              {activeTab === 'convergence' ? "Évolution de l'Entropie" : "Historique de Stress (24h)"}
+            </h4>
+            <div className="flex gap-1 bg-slate-950/80 p-0.5 rounded border border-slate-800 text-[9px] font-mono">
+              <button
+                onClick={() => setActiveTab('convergence')}
+                className={`px-2 py-0.5 rounded transition-all cursor-pointer ${
+                  activeTab === 'convergence'
+                    ? 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 font-bold'
+                    : 'text-slate-500 hover:text-slate-300 border border-transparent'
+                }`}
+              >
+                CONVERGENCE
+              </button>
+              <button
+                onClick={() => setActiveTab('stress24h')}
+                className={`px-2 py-0.5 rounded transition-all cursor-pointer ${
+                  activeTab === 'stress24h'
+                    ? 'bg-pink-500/20 text-pink-400 border border-pink-500/30 font-bold'
+                    : 'text-slate-500 hover:text-slate-300 border border-transparent'
+                }`}
+              >
+                STRESS (24H)
+              </button>
+            </div>
+          </div>
           
           <div className="h-[180px] w-full relative">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart
-                data={chartData}
-                margin={{ top: 10, right: 10, left: -25, bottom: 0 }}
-              >
-                <defs>
-                  <linearGradient id="entropyGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#6366f1" stopOpacity={0.25} />
-                    <stop offset="95%" stopColor="#6366f1" stopOpacity={0.0} />
-                  </linearGradient>
-                </defs>
-                
-                <CartesianGrid stroke="#0f172a" strokeDasharray="3 3" vertical={false} />
-                
-                <XAxis 
-                  dataKey="name" 
-                  stroke="#64748b" 
-                  fontSize={8} 
-                  tickLine={false} 
-                  axisLine={false}
-                  fontFamily="JetBrains Mono"
-                />
-                
-                <YAxis 
-                  stroke="#64748b" 
-                  fontSize={8} 
-                  tickLine={false} 
-                  axisLine={false}
-                  domain={[0, 1]}
-                  ticks={[0, 0.3, 0.6, 0.9]}
-                  fontFamily="JetBrains Mono"
-                />
+            {activeTab === 'convergence' ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart
+                  data={chartData}
+                  margin={{ top: 10, right: 10, left: -25, bottom: 0 }}
+                >
+                  <defs>
+                    <linearGradient id="entropyGradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#6366f1" stopOpacity={0.25} />
+                      <stop offset="95%" stopColor="#6366f1" stopOpacity={0.0} />
+                    </linearGradient>
+                  </defs>
+                  
+                  <CartesianGrid stroke="#0f172a" strokeDasharray="3 3" vertical={false} />
+                  
+                  <XAxis 
+                    dataKey="name" 
+                    stroke="#64748b" 
+                    fontSize={8} 
+                    tickLine={false} 
+                    axisLine={false}
+                    fontFamily="JetBrains Mono"
+                  />
+                  
+                  <YAxis 
+                    stroke="#64748b" 
+                    fontSize={8} 
+                    tickLine={false} 
+                    axisLine={false}
+                    domain={[0, 1]}
+                    ticks={[0, 0.3, 0.6, 0.9]}
+                    fontFamily="JetBrains Mono"
+                  />
 
-                {/* Reference Line for the 0.3 Standard Coherence Threshold */}
-                <ReferenceLine 
-                  y={0.3} 
-                  stroke="#10b981" 
-                  strokeDasharray="4 4" 
-                  strokeWidth={1}
-                  label={{ 
-                    value: 'NORME D.U.R. (0.3)', 
-                    position: 'top', 
-                    fill: '#10b981', 
-                    fontSize: 7, 
-                    fontFamily: 'JetBrains Mono',
-                    offset: 5
-                  }} 
-                />
+                  {/* Reference Line for the 0.3 Standard Coherence Threshold */}
+                  <ReferenceLine 
+                    y={0.3} 
+                    stroke="#10b981" 
+                    strokeDasharray="4 4" 
+                    strokeWidth={1}
+                    label={{ 
+                      value: 'NORME D.U.R. (0.3)', 
+                      position: 'top', 
+                      fill: '#10b981', 
+                      fontSize: 7, 
+                      fontFamily: 'JetBrains Mono',
+                      offset: 5
+                    }} 
+                  />
 
-                {/* Reference Line for User Custom Alert Threshold */}
-                <ReferenceLine 
-                  y={entropyAlertThreshold} 
-                  stroke="#ef4444" 
-                  strokeDasharray="3 3" 
-                  strokeWidth={1.5}
-                  label={{ 
-                    value: `ALERTE (${entropyAlertThreshold.toFixed(2)})`, 
-                    position: 'top', 
-                    fill: '#ef4444', 
-                    fontSize: 7, 
-                    fontFamily: 'JetBrains Mono',
-                    offset: 5
-                  }} 
-                />
+                  {/* Reference Line for User Custom Alert Threshold */}
+                  <ReferenceLine 
+                    y={entropyAlertThreshold} 
+                    stroke="#ef4444" 
+                    strokeDasharray="3 3" 
+                    strokeWidth={1.5}
+                    label={{ 
+                      value: `ALERTE (${entropyAlertThreshold.toFixed(2)})`, 
+                      position: 'top', 
+                      fill: '#ef4444', 
+                      fontSize: 7, 
+                      fontFamily: 'JetBrains Mono',
+                      offset: 5
+                    }} 
+                  />
 
-                <Tooltip
-                  content={({ active, payload }) => {
-                    if (active && payload && payload.length) {
-                      const data = payload[0].payload as ChartDataPoint;
-                      return (
-                        <div className="bg-slate-950/95 border border-slate-800 p-2.5 rounded shadow-2xl font-mono text-[10px] space-y-1">
-                          <p className="text-slate-300 font-bold border-b border-slate-900 pb-1 mb-1">
-                            {data.name}
-                          </p>
-                          <div className="flex justify-between gap-4">
-                            <span className="text-slate-500">Entropie quantique :</span>
-                            <span className={`font-bold ${
-                              data.entropy < 0.3 ? 'text-emerald-400' : data.entropy < 0.6 ? 'text-yellow-400' : 'text-red-400'
-                            }`}>{data.entropy} bits</span>
-                          </div>
-                          <div className="flex justify-between gap-4">
-                            <span className="text-slate-500">Cohérence :</span>
-                            <span className="text-indigo-400 font-bold">{data.coherencePct}%</span>
-                          </div>
-                          <div className="flex justify-between gap-4">
-                            <span className="text-slate-500">État :</span>
-                            <span className="text-slate-300">{data.stability}</span>
-                          </div>
-                          {!data.isReal && (
-                            <p className="text-[8px] text-slate-500 italic mt-1 pt-1 border-t border-slate-900">
-                              Télémétrie de base précédente
+                  <Tooltip
+                    content={({ active, payload }) => {
+                      if (active && payload && payload.length) {
+                        const data = payload[0].payload as ChartDataPoint;
+                        return (
+                          <div className="bg-slate-950/95 border border-slate-800 p-2.5 rounded shadow-2xl font-mono text-[10px] space-y-1 font-semibold">
+                            <p className="text-slate-300 font-bold border-b border-slate-900 pb-1 mb-1">
+                              {data.name}
                             </p>
-                          )}
-                        </div>
-                      );
-                    }
-                    return null;
-                  }}
-                />
+                            <div className="flex justify-between gap-4">
+                              <span className="text-slate-500 font-medium">Entropie quantique :</span>
+                              <span className={`font-bold ${
+                                data.entropy < 0.3 ? 'text-emerald-400' : data.entropy < 0.6 ? 'text-yellow-400' : 'text-red-400'
+                              }`}>{data.entropy} bits</span>
+                            </div>
+                            <div className="flex justify-between gap-4">
+                              <span className="text-slate-500 font-medium">Cohérence :</span>
+                              <span className="text-indigo-400 font-bold">{data.coherencePct}%</span>
+                            </div>
+                            <div className="flex justify-between gap-4">
+                              <span className="text-slate-500 font-medium">État :</span>
+                              <span className="text-slate-300">{data.stability}</span>
+                            </div>
+                            {!data.isReal && (
+                              <p className="text-[8px] text-slate-500 italic mt-1 pt-1 border-t border-slate-900">
+                                Télémétrie de base précédente
+                              </p>
+                            )}
+                          </div>
+                        );
+                      }
+                      return null;
+                    }}
+                  />
 
-                <Area
-                  type="monotone"
-                  dataKey="entropy"
-                  stroke="#6366f1"
-                  strokeWidth={2}
-                  fillOpacity={1}
-                  fill="url(#entropyGradient)"
-                  activeDot={{ r: 4, strokeWidth: 1, stroke: '#818cf8' }}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
+                  <Area
+                    type="monotone"
+                    dataKey="entropy"
+                    stroke="#6366f1"
+                    strokeWidth={2}
+                    fillOpacity={1}
+                    fill="url(#entropyGradient)"
+                    activeDot={{ r: 4, strokeWidth: 1, stroke: '#818cf8' }}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart
+                  data={dailyStressData}
+                  margin={{ top: 10, right: 10, left: -25, bottom: 0 }}
+                >
+                  <CartesianGrid stroke="#0f172a" strokeDasharray="3 3" vertical={false} />
+                  
+                  <XAxis 
+                    dataKey="label" 
+                    stroke="#64748b" 
+                    fontSize={8} 
+                    tickLine={false} 
+                    axisLine={false}
+                    fontFamily="JetBrains Mono"
+                  />
+                  
+                  <YAxis 
+                    stroke="#64748b" 
+                    fontSize={8} 
+                    tickLine={false} 
+                    axisLine={false}
+                    domain={[0, 1]}
+                    ticks={[0, 0.25, 0.5, 0.75, 1.0]}
+                    fontFamily="JetBrains Mono"
+                  />
+
+                  {/* Reference Line for Alert Threshold */}
+                  <ReferenceLine 
+                    y={entropyAlertThreshold} 
+                    stroke="#ef4444" 
+                    strokeDasharray="3 3" 
+                    strokeWidth={1.2}
+                    label={{ 
+                      value: `SEUIL ALERTE (${entropyAlertThreshold.toFixed(2)})`, 
+                      position: 'top', 
+                      fill: '#ef4444', 
+                      fontSize: 7, 
+                      fontFamily: 'JetBrains Mono',
+                      offset: 5
+                    }} 
+                  />
+
+                  <Tooltip
+                    content={({ active, payload }) => {
+                      if (active && payload && payload.length) {
+                        const data = payload[0].payload;
+                        return (
+                          <div className="bg-slate-950/95 border border-slate-800 p-2.5 rounded shadow-2xl font-mono text-[10px] space-y-1.5 font-semibold">
+                            <p className="text-slate-300 font-bold border-b border-slate-900 pb-1 mb-1 flex items-center justify-between gap-4">
+                              <span>Heure: {data.label}</span>
+                              <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded ${
+                                data.isReal ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20' : 'bg-slate-900 text-slate-500'
+                              }`}>
+                                {data.isReal ? 'LIVE' : 'SIMULÉ'}
+                              </span>
+                            </p>
+                            <p className="text-[9px] text-slate-400 italic leading-tight max-w-[180px] font-medium">
+                              {data.description}
+                            </p>
+                            <div className="flex justify-between gap-4 pt-1 border-t border-slate-900">
+                              <span className="text-slate-500 font-medium">Entropie Moyenne :</span>
+                              <span className={`font-bold ${
+                                data.entropy < 0.3 ? 'text-emerald-400' : data.entropy < 0.6 ? 'text-yellow-400' : 'text-red-400'
+                              }`}>{data.entropy.toFixed(3)} bits</span>
+                            </div>
+                            <div className="flex justify-between gap-4">
+                              <span className="text-slate-500 font-medium">Stress Système :</span>
+                              <span className={`font-bold ${
+                                data.stressIndex < 0.3 ? 'text-emerald-400' : data.stressIndex < 0.6 ? 'text-yellow-400' : 'text-pink-400'
+                              }`}>{Math.round(data.stressIndex * 100)}%</span>
+                            </div>
+                            {data.isReal && (
+                              <div className="flex justify-between gap-4">
+                                <span className="text-slate-500 font-medium">Analyses ToT :</span>
+                                <span className="text-indigo-400 font-bold">{data.incidentCount} active(s)</span>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      }
+                      return null;
+                    }}
+                  />
+
+                  <Line
+                    type="monotone"
+                    dataKey="stressIndex"
+                    name="Stress Système"
+                    stroke="#ec4899"
+                    strokeWidth={2}
+                    dot={{ r: 2, fill: '#ec4899', strokeWidth: 0 }}
+                    activeDot={{ r: 4, strokeWidth: 1, stroke: '#f472b6' }}
+                  />
+
+                  <Line
+                    type="monotone"
+                    dataKey="entropy"
+                    name="Entropie Quantique"
+                    stroke="#6366f1"
+                    strokeWidth={1.5}
+                    strokeDasharray="4 4"
+                    dot={{ r: 1.5, fill: '#6366f1', strokeWidth: 0 }}
+                    activeDot={{ r: 3, strokeWidth: 1, stroke: '#818cf8' }}
+                  />
+                  
+                  <Legend 
+                    verticalAlign="bottom" 
+                    height={20} 
+                    content={({ payload }) => (
+                      <div className="flex justify-center gap-4 text-[8px] font-mono text-slate-400 mt-2">
+                        {payload?.map((entry: any, index: number) => (
+                          <div key={`legend-${index}`} className="flex items-center gap-1.5">
+                            <span 
+                              className="w-1.5 h-1.5 rounded-full" 
+                              style={{ 
+                                backgroundColor: entry.color,
+                                border: entry.strokeDasharray ? `1px dashed ${entry.color}` : 'none' 
+                              }} 
+                            />
+                            <span>{entry.value.toUpperCase()}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </div>
 

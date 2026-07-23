@@ -186,7 +186,9 @@ export const GoogleSheetsIntegration: React.FC<GoogleSheetsIntegrationProps> = (
       }
     } catch (err: any) {
       console.error('Failed to link Sheets credentials:', err);
-      if (err.code === 'auth/popup-blocked' || err.message?.includes('popup-blocked')) {
+      if (err.code === 'auth/cancelled-popup-request' || err.message?.includes('cancelled-popup-request') || err.message === 'auth/cancelled-popup-request') {
+        // Ignorer l'annulation
+      } else if (err.code === 'auth/popup-blocked' || err.message?.includes('popup-blocked')) {
         setErrorMsg('Bloqueur de popups actif. Veuillez autoriser les popups ou ouvrir l\'application dans un nouvel onglet.');
       } else {
         setErrorMsg(err.message || 'Échec de la connexion Google Sheets.');

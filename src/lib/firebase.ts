@@ -60,6 +60,12 @@ googleProvider.addScope('https://www.googleapis.com/auth/spreadsheets');
 googleProvider.addScope('https://www.googleapis.com/auth/forms.body');
 googleProvider.addScope('https://www.googleapis.com/auth/forms.body.readonly');
 googleProvider.addScope('https://www.googleapis.com/auth/forms.responses.readonly');
+googleProvider.addScope('https://www.googleapis.com/auth/tasks');
+googleProvider.addScope('https://www.googleapis.com/auth/tasks.readonly');
+googleProvider.addScope('https://www.googleapis.com/auth/presentations');
+googleProvider.addScope('https://www.googleapis.com/auth/presentations.readonly');
+googleProvider.addScope('https://www.googleapis.com/auth/documents');
+googleProvider.addScope('https://www.googleapis.com/auth/documents.readonly');
 
 // In-memory access token cache
 let cachedAccessToken: string | null = null;
@@ -119,7 +125,13 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   // Ne pas jeter d'exception bloquante pour préserver l'exécution de l'UI et permettre le mode résilient / hors-ligne
 }
 
+let isLoginPopupOpen = false;
+
 export async function loginWithGoogle() {
+  if (isLoginPopupOpen) {
+    throw new Error('auth/cancelled-popup-request');
+  }
+  isLoginPopupOpen = true;
   try {
     const result = await signInWithPopup(auth, googleProvider);
     const credential = GoogleAuthProvider.credentialFromResult(result);
@@ -127,9 +139,11 @@ export async function loginWithGoogle() {
       cachedAccessToken = credential.accessToken;
     }
     return { user: result.user, accessToken: cachedAccessToken };
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error during Google authentication popup:', error);
     throw error;
+  } finally {
+    isLoginPopupOpen = false;
   }
 }
 

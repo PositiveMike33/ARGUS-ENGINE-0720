@@ -70,6 +70,11 @@ export const StmRealTimeTracker: React.FC<StmRealTimeTrackerProps> = ({ external
   const [filter, setFilter] = useState<'ALL' | 'BUS' | 'METRO'>('ALL');
   const polylineRef = useRef<L.LayerGroup | null>(null);
 
+  // Adaptative polling state variables
+  const [hasCriticalAlerts, setHasCriticalAlerts] = useState(false);
+  const [pollingInterval, setPollingInterval] = useState(15000);
+  const [criticalAlertsList, setCriticalAlertsList] = useState<any[]>([]);
+
   useEffect(() => {
     if (externalFilter) {
       setFilter(externalFilter);
@@ -154,11 +159,52 @@ export const StmRealTimeTracker: React.FC<StmRealTimeTrackerProps> = ({ external
     }
   };
 
+  const fetchAlerts = async () => {
+    try {
+      const headers: Record<string, string> = {};
+      if (auth.currentUser) {
+        const token = await auth.currentUser.getIdToken();
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      const res = await fetch('/api/stm/realtime', { headers });
+      if (!res.ok) throw new Error('Failed to fetch STM realtime status');
+      const data = await res.json();
+
+      if (data.success && data.data) {
+        const alerts = data.data.majorAlerts || [];
+        const criticalAlerts = alerts.filter((alert: any) => alert.severity === 'critical');
+        setCriticalAlertsList(criticalAlerts);
+        
+        if (criticalAlerts.length > 0) {
+          setHasCriticalAlerts(true);
+          setPollingInterval(5000); // 5 seconds polling during critical incidents
+        } else {
+          setHasCriticalAlerts(false);
+          setPollingInterval(15000); // 15 seconds nominal polling
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching STM alerts for adaptive polling:', err);
+    }
+  };
+
+  // Initial load
   useEffect(() => {
     fetchVehicles();
-    const interval = setInterval(fetchVehicles, 15000);
-    return () => clearInterval(interval);
+    fetchAlerts();
   }, []);
+
+  // Adaptive polling interval setup
+  useEffect(() => {
+    const tick = async () => {
+      await fetchVehicles();
+      await fetchAlerts();
+    };
+
+    const interval = setInterval(tick, pollingInterval);
+    return () => clearInterval(interval);
+  }, [pollingInterval]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -265,6 +311,20 @@ export const StmRealTimeTracker: React.FC<StmRealTimeTrackerProps> = ({ external
             </button>
           </div>
 
+          <div className="hidden md:flex items-center gap-2">
+            {hasCriticalAlerts ? (
+              <span className="flex h-2 w-2 relative">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
+              </span>
+            ) : (
+              <span className="h-2 w-2 rounded-full bg-emerald-500"></span>
+            )}
+            <span className={`text-[10px] font-mono uppercase ${hasCriticalAlerts ? 'text-red-400 font-bold animate-pulse' : 'text-slate-400'}`}>
+              {hasCriticalAlerts ? 'POLLING CRITIQUE (5s)' : 'Polling nominal (15s)'}
+            </span>
+          </div>
+
           <div className="text-xs text-slate-400 font-mono">
             {vehicles.length} véhicules actifs
           </div>
@@ -301,6 +361,27 @@ export const StmRealTimeTracker: React.FC<StmRealTimeTrackerProps> = ({ external
               Métros Actifs: {vehicles.filter(v => v.type === 'METRO').length}
             </div>
           </div>
+
+          {criticalAlertsList.length > 0 && (
+            <div className="bg-red-950/90 backdrop-blur border border-red-500/50 rounded-lg p-3 shadow-xl pointer-events-auto animate-pulse">
+              <div className="flex items-center gap-2 text-red-400 font-bold text-xs mb-2">
+                <AlertTriangle className="w-4 h-4 shrink-0 text-red-400" />
+                <span className="text-[10px] sm:text-xs tracking-wider">ALERTES RÉSEAU CRITIQUES</span>
+              </div>
+              <div className="space-y-1.5 max-h-48 overflow-y-auto scrollbar-none">
+                {criticalAlertsList.map((alert, idx) => (
+                  <div key={idx} className="bg-red-500/10 border border-red-500/20 rounded p-2 text-[10px]">
+                    <div className="font-bold text-red-300 uppercase mb-0.5 leading-tight">{alert.title}</div>
+                    <p className="text-red-200/80 leading-tight mb-1">{alert.details}</p>
+                    <div className="text-[8px] text-red-400 font-mono flex justify-between">
+                      <span>Ligne: {alert.lineAffected}</span>
+                      <span>Sévérité: {alert.severity}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="bg-slate-900/80 backdrop-blur border border-indigo-500/30 rounded-lg p-3 shadow-xl pointer-events-auto">
             <div className="flex items-center justify-between mb-3">

@@ -879,7 +879,7 @@ export const ItineraryPlanner: React.FC<ItineraryPlannerProps> = ({ feeds, onSim
         { instruction: "Départ de 50 Avenue Labatt ➔ Newman / Labatt", sector: 'ROUTE', durationMin: 2 },
         { instruction: `Bus STM 106 Est : Newman/Labatt ➔ Station Angrignon (${isLateWknd ? 'Retour Week-end 23h' : 'Attente'}: ${wait106}m | Trajet: ${transit106}m)`, sector: 'STM', durationMin: wait106 + transit106 },
         { instruction: "Métro Ligne Verte : Station Angrignon ➔ Station Frontenac", sector: 'STM', durationMin: 18 },
-        { instruction: "Bus STM 94 Nord : Station Frontenac ➔ 2200 Rue des Carrières (sur l'Axe Iberville)", sector: 'STM', durationMin: 8 }
+        { instruction: "Bus STM 94 Nord : Station Frontenac ➔ 2200 Rue des Carrières (sur la rue Frontenac)", sector: 'STM', durationMin: 8 }
       ];
       r2Safety = isLateWknd ? 92 : Math.round(stmF * 0.94);
       r2Name = isLateWknd ? '💼 Retour Week-end 23h via Angrignon & d\'Iberville (Bus 94)' : 'Retour Ligne Verte via Angrignon & d\'Iberville (Bus 94)';
@@ -905,7 +905,7 @@ export const ItineraryPlanner: React.FC<ItineraryPlannerProps> = ({ feeds, onSim
         { instruction: "Départ de 365 Av. George-V (Véronique) ➔ Arrêt Notre-Dame / George-V", sector: 'ROUTE', durationMin: 4 },
         { instruction: `Bus STM 195 Est : Notre-Dame/George-V ➔ Station Angrignon (Attente: ${wait195}m | Trajet: ${transit195}m)`, sector: 'STM', durationMin: wait195 + transit195 },
         { instruction: "Métro Ligne Verte : Angrignon ➔ Station Frontenac", sector: 'STM', durationMin: 18 },
-        { instruction: "Bus STM 94 Nord : Station Frontenac ➔ 2200 Rue des Carrières (sur l'Axe Iberville)", sector: 'ROUTE', durationMin: 8 }
+        { instruction: "Bus STM 94 Nord : Station Frontenac ➔ 2200 Rue des Carrières (sur la rue Frontenac)", sector: 'ROUTE', durationMin: 8 }
       ];
       r2Safety = Math.round(stmF * 0.94);
       r2Name = 'Retour via Bus 195 Est & Bus 94 Nord';
@@ -1105,21 +1105,7 @@ export const ItineraryPlanner: React.FC<ItineraryPlannerProps> = ({ feeds, onSim
     const interval = setInterval(() => {
       setRecalculating(true);
       
-      // Force synchronization with the user's real geolocation before every calculation
-      if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
-          (position) => {
-            setGpsLatitude(position.coords.latitude);
-            setGpsLongitude(position.coords.longitude);
-            setIsGpsActive(true);
-            setIsManualActive(false);
-          },
-          (err) => {
-            console.warn("Forced GPS auto-synchronization failed. Utilizing default coordinates.", err);
-          },
-          { enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 }
-        );
-      }
+      // GPS syncing is moved to a separate watchPosition or done manually to prevent UI freezing
 
       // Randomly select one feed to modify slightly
       const updatedFeeds = [...feeds];

@@ -235,9 +235,10 @@ export const D3TransitMap: React.FC<D3TransitMapProps> = ({
     const resizeObserver = new ResizeObserver((entries) => {
       for (let entry of entries) {
         const { width } = entry.contentRect;
-        setDimensions({
-          width: Math.max(300, width),
-          height: 380
+        setDimensions(prev => {
+          const newWidth = Math.max(300, width);
+          if (prev.width === newWidth && prev.height === 380) return prev;
+          return { width: newWidth, height: 380 };
         });
       }
     });
@@ -1027,12 +1028,6 @@ export const D3TransitMap: React.FC<D3TransitMapProps> = ({
   };
 
   // Keep background cache updated automatically whenever nodes or layer changes
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      captureMapAsPng(false).catch(() => {});
-    }, 1500);
-    return () => clearTimeout(timer);
-  }, [dimensions, activePathNodes, activeAlertsByNode, activeLayer, origin, destination]);
 
   return (
     <div 

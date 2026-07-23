@@ -687,7 +687,9 @@ export const GmailIntegration: React.FC<GmailIntegrationProps> = ({
       }
     } catch (err: any) {
       console.error('Failed to link Gmail credentials: ', err);
-      if (err.code === 'auth/popup-blocked' || err.message?.includes('popup-blocked')) {
+      if (err.code === 'auth/cancelled-popup-request' || err.message?.includes('cancelled-popup-request') || err.message === 'auth/cancelled-popup-request') {
+        // Ignorer l'annulation
+      } else if (err.code === 'auth/popup-blocked' || err.message?.includes('popup-blocked')) {
         setAuthError('Le bloqueur de popups de votre navigateur a bloqué la fenêtre d\'authentification Google (car l\'application s\'exécute dans l\'iframe sécurisé d\'AI Studio). Pour résoudre ce problème, autorisez les popups pour ce site dans votre navigateur ou ouvrez l\'application dans un nouvel onglet via le bouton en haut à droite d\'AI Studio.');
       } else {
         setAuthError(err.message || 'Impossible de lier vos identifiants Google.');

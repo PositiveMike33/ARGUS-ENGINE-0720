@@ -4,7 +4,7 @@
  */
 
 import { useState, useEffect, useMemo, FormEvent } from 'react';
-import { FeedItem, ToTAnalysisResult, APIIntegrationLog } from './types';
+import { FeedItem, FeedType, ToTAnalysisResult, APIIntegrationLog } from './types';
 import { initialFeedItems } from './data/mockFeeds';
 import { FeedCard } from './components/FeedCard';
 import { ToTReasoner } from './components/ToTReasoner';
@@ -17,14 +17,19 @@ import { ItineraryPlanner } from './components/ItineraryPlanner';
 import { ExecutiveSummaryDashboard } from './components/ExecutiveSummaryDashboard';
 import { CriticalRouteTimeline } from './components/CriticalRouteTimeline';
 import { StmHealthTrendVisualizer } from './components/StmHealthTrendVisualizer';
+import { StmStationThermalChart } from './components/StmStationThermalChart';
+import { StmThermalIncidentScatterPlot } from './components/StmThermalIncidentScatterPlot';
 import { StmNetworkTopology } from './components/StmNetworkTopology';
 import { StmBusFleetVisualizer } from './components/StmBusFleetVisualizer';
 import { StmDecisionCorrelationVisualizer } from './components/StmDecisionCorrelationVisualizer';
 import { PredictiveAlertEngine } from './components/PredictiveAlertEngine';
 import { DecisionInsights } from './components/DecisionInsights';
 import { ArgusStreamDashboard } from './components/ArgusStreamDashboard';
+import { ToTModelStats } from './components/ToTModelStats';
 import { ApiTester } from './components/ApiTester';
 import { ArgusMarketingCampaign } from './components/ArgusMarketingCampaign';
+import { AikidoDashboard } from './components/AikidoDashboard';
+import { PersonalAssistantDashboard } from './components/PersonalAssistantDashboard';
 import { motion, AnimatePresence, LayoutGroup } from 'motion/react';
 import { 
   Shield, 
@@ -63,7 +68,8 @@ import {
   Play,
   Pause,
   RotateCcw,
-  History
+  History,
+  CheckSquare
 } from 'lucide-react';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { collection, doc, onSnapshot, query, setDoc, where } from 'firebase/firestore';
@@ -74,9 +80,13 @@ import { GoogleKeepIntegration } from './components/GoogleKeepIntegration';
 import { GoogleDriveIntegration } from './components/GoogleDriveIntegration';
 import { GoogleSheetsIntegration } from './components/GoogleSheetsIntegration';
 import { STMIncidentMap } from './components/STMIncidentMap';
+import { GoogleMapsIntegration } from './components/GoogleMapsIntegration';
 import { OpenSkyTracker, FlightVector } from './components/OpenSkyTracker';
 import { AirspaceOverview } from './components/AirspaceOverview';
 import { GoogleFormsIntegration } from './components/GoogleFormsIntegration';
+import { GoogleTasksIntegration } from './components/GoogleTasksIntegration';
+import { GoogleSlidesIntegration } from './components/GoogleSlidesIntegration';
+import { GoogleDocsIntegration } from './components/GoogleDocsIntegration';
 import { TrafficCctvPanel } from './components/TrafficCctvPanel';
 import { StmRealTimeTracker } from './components/StmRealTimeTracker';
 
@@ -112,7 +122,7 @@ export default function App() {
   const [selectedFeed, setSelectedFeed] = useState<FeedItem | null>(null);
   const [flights, setFlights] = useState<FlightVector[]>([]);
   const [selectedFlight, setSelectedFlight] = useState<FlightVector | null>(null);
-  const [activeGeospatialTab, setActiveGeospatialTab] = useState<'map' | 'airspace' | 'cctv' | 'gtfs'>('map');
+  const [activeGeospatialTab, setActiveGeospatialTab] = useState<'map' | 'google-map' | 'airspace' | 'cctv' | 'gtfs'>('map');
   const [isGeospatialFullscreen, setIsGeospatialFullscreen] = useState<boolean>(false);
   const [currentTime, setCurrentTime] = useState<Date>(new Date());
   const [timeOffsetMinutes, setTimeOffsetMinutes] = useState<number>(0);
@@ -219,6 +229,7 @@ export default function App() {
   const [isFetchingStm, setIsFetchingStm] = useState<boolean>(false);
   const [lastStmFetchTime, setLastStmFetchTime] = useState<Date | null>(null);
   const [stmMonitorView, setStmMonitorView] = useState<'METRO' | 'BUS'>('METRO');
+  const [isStmAutoRefreshPaused, setIsStmAutoRefreshPaused] = useState<boolean>(false);
 
   // Filtrage temporel des flux ARGUS pour la corrélation historique (time-slider)
   const filteredFeedsByTime = useMemo(() => {
@@ -226,6 +237,27 @@ export default function App() {
     const simulatedTime = new Date(currentTime.getTime() + timeOffsetMinutes * 60 * 1000);
     return feeds.filter(feed => new Date(feed.timestamp) <= simulatedTime);
   }, [feeds, timeOffsetMinutes, currentTime]);
+
+  // Détermination du statut 'perturbé' du réseau STM
+  const isStmDisturbed = useMemo(() => {
+    // 1. En mode BUS : "Lignes Fréquentes" est perturbé
+    if (stmMonitorView === 'BUS') return true;
+
+    // 2. Si stmLiveStatus a des lignes de métro perturbées (status !== 'normal')
+    if (stmLiveStatus?.lines) {
+      const hasLineDisturbance = Object.values(stmLiveStatus.lines).some((line: any) => line?.status && line.status !== 'normal');
+      if (hasLineDisturbance) return true;
+    }
+
+    // 3. Si un incident STM dans les flux a une sévérité moyenne, haute ou critique
+    const hasDisturbedFeed = filteredFeedsByTime.some(
+      f => (f.severity === 'critical' || f.severity === 'high' || f.severity === 'medium') &&
+           (f.type === 'STM' || f.title.toLowerCase().includes('stm') || f.source.toLowerCase().includes('stm') || f.details.toLowerCase().includes('retard') || f.details.toLowerCase().includes('panne'))
+    );
+    if (hasDisturbedFeed) return true;
+
+    return false;
+  }, [stmLiveStatus, filteredFeedsByTime, stmMonitorView]);
 
   // Correlation Analysis & Next-Hour Fluidity Trend Prediction
   const predictedFluidityTrend = useMemo(() => {
@@ -326,24 +358,40 @@ export default function App() {
   }, [feeds]);
 
   const fetchStmLive = async () => {
-    setIsFetchingStm(true);
-    try {
-      const res = await fetchWithAuth('/api/stm/realtime');
-      
-      if (!res.ok) {
-        console.warn('STM live status sync returned non-OK status:', res.status);
-        setIsFetchingStm(false);
-        return;
-      }
-      
-      const contentType = res.headers.get('content-type');
-      if (!contentType || !contentType.includes('application/json')) {
-        console.warn('STM live status sync returned non-JSON content-type:', contentType);
-        setIsFetchingStm(false);
-        return;
-      }
+    let retryCount = 0;
+    const maxRetries = 3;
 
-      const result = await res.json();
+    while (retryCount <= maxRetries) {
+      if (retryCount === 0) setIsFetchingStm(true);
+      try {
+        const res = await fetchWithAuth('/api/stm/realtime');
+        
+        if (!res.ok) {
+          if (res.status >= 500 && retryCount < maxRetries) {
+            console.warn(`STM live status sync failed (5xx). Retrying in ${Math.pow(2, retryCount) * 1000}ms...`);
+            await new Promise(resolve => setTimeout(resolve, Math.pow(2, retryCount) * 1000));
+            retryCount++;
+            continue;
+          }
+          console.warn('STM live status sync returned non-OK status:', res.status);
+          setIsFetchingStm(false);
+          return;
+        }
+        
+        const contentType = res.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+          if (retryCount < maxRetries) {
+            console.warn(`STM live status sync returned non-JSON content-type: ${contentType}. Retrying in ${Math.pow(2, retryCount) * 1000}ms...`);
+            await new Promise(resolve => setTimeout(resolve, Math.pow(2, retryCount) * 1000));
+            retryCount++;
+            continue;
+          }
+          console.warn('STM live status sync returned non-JSON content-type:', contentType);
+          setIsFetchingStm(false);
+          return;
+        }
+
+        const result = await res.json();
       if (result.success && result.data) {
         const liveData = {
           ...result.data,
@@ -403,20 +451,84 @@ export default function App() {
         // Trigger telemetry log update
         fetchTelemetryLogs();
       }
-    } catch (err) {
-      console.warn('Failed to sync STM live status gracefully:', err);
-    } finally {
       setIsFetchingStm(false);
+      return;
+    } catch (err) {
+      if (retryCount < maxRetries) {
+        console.warn(`Failed to sync STM live status gracefully: ${err}. Retrying in ${Math.pow(2, retryCount) * 1000}ms...`);
+        await new Promise(resolve => setTimeout(resolve, Math.pow(2, retryCount) * 1000));
+        retryCount++;
+        continue;
+      }
+      console.warn('Failed to sync STM live status gracefully:', err);
+      setIsFetchingStm(false);
+      return;
     }
-  };
+  }
+};
 
   // Automated 60-second polling for real-time STM telemetry
   useEffect(() => {
     fetchStmLive();
     const interval = setInterval(() => {
-      fetchStmLive();
+      if (!isStmAutoRefreshPaused) {
+        fetchStmLive();
+      }
     }, 60000);
     return () => clearInterval(interval);
+  }, [isStmAutoRefreshPaused]);
+
+  // SSE Real-time Streaming Listener for Argus Engine Telemetry & Critical Alerts
+  useEffect(() => {
+    const eventSource = new EventSource('/api/argus/events');
+
+    eventSource.addEventListener('telemetry_update', (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        const newFeedItem: FeedItem = {
+          id: data.id || `sse-telemetry-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+          type: (data.type as FeedType) || 'STM',
+          title: data.title || `Ping Télémétrique ARGUS (${data.targetId || data.agentId || 'Agent Live'})`,
+          source: data.source || 'ARGUS SSE Stream',
+          severity: data.isAlertFlag ? 'high' : (data.severity || 'low'),
+          timestamp: data.timestamp ? new Date(data.timestamp).toLocaleTimeString('fr-FR') : new Date().toLocaleTimeString('fr-FR'),
+          value: data.value || (data.speed !== undefined ? `${data.speed} km/h` : 'Ping actif'),
+          details: data.details ? (typeof data.details === 'object' ? JSON.stringify(data.details) : String(data.details)) : `Position: (${data.lat?.toFixed(4)}, ${data.lng?.toFixed(4)}) - Alt: ${data.altitude || 0}m`,
+          mcpStandardized: false
+        };
+        setFeeds(prev => [newFeedItem, ...prev]);
+      } catch (err) {
+        console.warn('[SSE] Error parsing telemetry_update:', err);
+      }
+    });
+
+    eventSource.addEventListener('alert_critical', (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        const alertFeedItem: FeedItem = {
+          id: `sse-alert-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+          type: 'STM',
+          title: `ANOMALIE CRITIQUE: ${data.type || 'Impossible Travel'} (${data.targetId || 'Cible Suspecte'})`,
+          source: 'ARGUS Anomaly Engine',
+          severity: 'critical',
+          timestamp: data.timestamp ? new Date(data.timestamp).toLocaleTimeString('fr-FR') : new Date().toLocaleTimeString('fr-FR'),
+          value: data.details?.speedKmh ? `Vitesse: ${data.details.speedKmh} km/h` : 'Alerte Vitesse',
+          details: data.details ? `Ecart: ${data.details.distanceKm} km en ${data.details.timeGapSeconds} sec. De (${data.details.from?.lat}, ${data.details.from?.lng}) vers (${data.details.to?.lat}, ${data.details.to?.lng})` : 'Déplacement physiquement impossible détecté.',
+          mcpStandardized: false
+        };
+        setFeeds(prev => [alertFeedItem, ...prev]);
+      } catch (err) {
+        console.warn('[SSE] Error parsing alert_critical:', err);
+      }
+    });
+
+    eventSource.onerror = (err) => {
+      console.warn('[SSE] EventSource connection issue:', err);
+    };
+
+    return () => {
+      eventSource.close();
+    };
   }, []);
 
   // Incident state cleaning & de-duplication logic (Protocol CLEANUP-V2)
@@ -508,8 +620,8 @@ export default function App() {
   const [gmailToken, setGmailToken] = useState<string | null>(null);
   const [isLoggingIn, setIsLoggingIn] = useState<boolean>(false);
   const [operatorAuthError, setOperatorAuthError] = useState<string | null>(null);
-  const [workspaceTab, setWorkspaceTab] = useState<'gmail' | 'calendar' | 'drive' | 'sheets' | 'keep' | 'forms' | 'grid'>('grid');
-  const [activeMainTab, setActiveMainTab] = useState<'supervision' | 'tot' | 'stats' | 'planner' | 'workspace' | 'api-test' | 'marketing'>('supervision');
+  const [workspaceTab, setWorkspaceTab] = useState<'gmail' | 'calendar' | 'drive' | 'sheets' | 'keep' | 'forms' | 'tasks' | 'slides' | 'docs' | 'grid'>('grid');
+  const [activeMainTab, setActiveMainTab] = useState<'supervision' | 'tot' | 'stats' | 'planner' | 'workspace' | 'api-test' | 'marketing' | 'aikido' | 'assistant'>('supervision');
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -562,7 +674,9 @@ export default function App() {
       }
     } catch (err: any) {
       console.error('Login error:', err);
-      if (err.code === 'auth/popup-blocked' || err.message?.includes('popup-blocked')) {
+      if (err.code === 'auth/cancelled-popup-request' || err.message?.includes('cancelled-popup-request') || err.message === 'auth/cancelled-popup-request') {
+        // Ignorer l'annulation
+      } else if (err.code === 'auth/popup-blocked' || err.message?.includes('popup-blocked')) {
         setOperatorAuthError('Le bloqueur de popups de votre navigateur a bloqué la fenêtre d\'authentification Google (car l\'application s\'exécute dans l\'iframe d\'AI Studio). Veuillez autoriser les popups pour ce site dans votre navigateur, ou ouvrez l\'application dans un nouvel onglet en cliquant sur le bouton en haut à droite d\'AI Studio pour contourner les restrictions d\'iframe.');
       } else {
         setOperatorAuthError(err.message || 'Impossible de lier vos identifiants Google.');
@@ -1458,6 +1572,8 @@ export default function App() {
             { key: 'workspace', label: 'Workspace', icon: '💼', desc: 'Command Center' },
             { key: 'api-test', label: 'Test d\'API REST', icon: '🧪', desc: 'Vérification Argus' },
             { key: 'marketing', label: 'Portail SaaS Pro', icon: '💎', desc: 'Gestion Commerciale' },
+            { key: 'aikido', label: 'Aikido Security', icon: '🛡️', desc: 'Audit & Vulnérabilités' },
+            { key: 'assistant', label: 'Assistant', icon: '🤖', desc: 'Compétences IA' },
           ] as const).map((tab) => (
             <button
               key={tab.key}
@@ -1523,7 +1639,15 @@ export default function App() {
               className="max-w-7xl w-full mx-auto px-4 md:px-6 pt-4 md:pt-6 space-y-6"
             >
                {/* Real-Time STM Telemetry Monitoring Banner */}
-              <div className="bg-slate-900/60 backdrop-blur-md rounded-xl border border-slate-800 p-4 shadow-xl flex flex-col lg:flex-row lg:items-stretch justify-between gap-5 transition-all hover:border-slate-700/60" id="stm-realtime-monitoring-banner">
+              <div 
+                className={`bg-slate-900/60 backdrop-blur-md rounded-xl border p-4 shadow-xl flex flex-col gap-5 transition-all ${
+                  isStmDisturbed 
+                    ? 'border-amber-500/80 ring-1 ring-amber-500/30 animate-pulse shadow-[0_0_20px_rgba(245,158,11,0.2)]' 
+                    : 'border-slate-800 hover:border-slate-700/60'
+                }`} 
+                id="stm-realtime-monitoring-banner"
+              >
+                <div className="flex flex-col lg:flex-row lg:items-stretch justify-between gap-5">
                 <div className="space-y-1.5 flex-1 flex flex-col justify-between text-left">
                   <div>
                     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800/40 pb-2.5 mb-2">
@@ -1554,8 +1678,38 @@ export default function App() {
                         )}
                       </div>
 
-                      {/* Segmented Filter Toggle without reloading */}
-                      <div className="flex bg-slate-950 p-0.5 rounded-lg border border-slate-800/80 text-[10px] font-mono select-none" id="stm-banner-filter-toggle">
+                      {/* Header controls: Pause Auto-Refresh + Segmented Filter Toggle */}
+                      <div className="flex flex-wrap items-center gap-2" id="stm-banner-top-right-controls">
+                        {/* Auto-Refresh Pause/Play Control Button */}
+                        <button
+                          id="stm-auto-refresh-toggle-btn"
+                          onClick={() => setIsStmAutoRefreshPaused(!isStmAutoRefreshPaused)}
+                          className={`px-2.5 py-1 rounded-lg border text-[9px] font-mono font-bold flex items-center gap-2 transition-all cursor-pointer select-none ${
+                            isStmAutoRefreshPaused
+                              ? 'bg-amber-950/40 border-amber-800/80 text-amber-300 hover:bg-amber-900/50 shadow-sm'
+                              : 'bg-slate-950 border-slate-800 text-slate-200 hover:border-slate-700 shadow-sm'
+                          }`}
+                          title={isStmAutoRefreshPaused ? "Reprendre le rafraîchissement automatique des données STM" : "Mettre en pause le rafraîchissement automatique des données STM"}
+                        >
+                          <div className="flex items-center gap-1.5">
+                            {isStmAutoRefreshPaused ? (
+                              <>
+                                <Play className="w-3 h-3 text-amber-400 fill-amber-400/20" />
+                                <span className="w-2 h-2 rounded-full bg-amber-400" />
+                                <span className="text-amber-300">AUTO-REFRESH: PAUSE</span>
+                              </>
+                            ) : (
+                              <>
+                                <Pause className="w-3 h-3 text-emerald-400" />
+                                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                                <span className="text-slate-300">AUTO-REFRESH: ACTIF (60s)</span>
+                              </>
+                            )}
+                          </div>
+                        </button>
+
+                        {/* Segmented Filter Toggle without reloading */}
+                        <div className="flex bg-slate-950 p-0.5 rounded-lg border border-slate-800/80 text-[10px] font-mono select-none" id="stm-banner-filter-toggle">
                         <button
                           onClick={() => setStmMonitorView('METRO')}
                           className={`px-3 py-1 rounded-md transition-all duration-150 flex items-center gap-1.5 cursor-pointer text-[9px] font-bold ${
@@ -1586,6 +1740,7 @@ export default function App() {
                         </button>
                       </div>
                     </div>
+                  </div>
                     
                     <p className="text-[10px] text-slate-400 font-sans max-w-2xl leading-relaxed mt-2">
                       {stmMonitorView === 'METRO' 
@@ -1759,6 +1914,13 @@ export default function App() {
                 </div>
               </div>
 
+              {/* Courbe de variation thermique recharts des stations STM (-60 minutes) */}
+              <div className="border-t border-slate-800/80 pt-2 grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <StmStationThermalChart />
+                <StmThermalIncidentScatterPlot feeds={filteredFeedsByTime} stmLiveStatus={stmLiveStatus} />
+              </div>
+            </div>
+
               {/* 1.5 Geospatial & Aviation Intelligence Command Center */}
               <div 
                 className={`bg-slate-950 rounded-xl border border-slate-900 p-5 space-y-4 transition-all duration-300 ${
@@ -1785,6 +1947,16 @@ export default function App() {
                       }`}
                     >
                       🗺️ CARTOGRAPHIE DES INCIDENTS STM
+                    </button>
+                    <button
+                      onClick={() => setActiveGeospatialTab('google-map')}
+                      className={`px-3.5 py-1.5 rounded-lg text-xs font-mono font-medium transition-all duration-200 border cursor-pointer ${
+                        activeGeospatialTab === 'google-map'
+                          ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg shadow-indigo-600/10 font-bold'
+                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                      }`}
+                    >
+                      📍 GOOGLE MAPS INTELLIGENCE
                     </button>
                     <button
                       onClick={() => setActiveGeospatialTab('airspace')}
@@ -1959,6 +2131,12 @@ export default function App() {
                     <div className={`lg:col-span-8 flex flex-col ${isGeospatialFullscreen ? 'flex-1 h-full min-h-[450px]' : 'h-[520px]'}`}>
                       {activeGeospatialTab === 'map' ? (
                         <STMIncidentMap
+                          feeds={filteredFeedsByTime}
+                          selectedFeed={selectedFeed}
+                          onSelectFeed={(feed) => setSelectedFeed(feed)}
+                        />
+                      ) : activeGeospatialTab === 'google-map' ? (
+                        <GoogleMapsIntegration
                           feeds={filteredFeedsByTime}
                           selectedFeed={selectedFeed}
                           onSelectFeed={(feed) => setSelectedFeed(feed)}
@@ -2174,6 +2352,8 @@ export default function App() {
               transition={{ duration: 0.2 }}
               className="max-w-7xl w-full mx-auto px-4 md:px-6 pt-4 md:pt-6 space-y-6"
             >
+              <ToTModelStats decisionsArchive={decisionsArchive} />
+              
               <StmHealthTrendVisualizer feeds={feeds} />
               
               <StmDecisionCorrelationVisualizer feeds={feeds} decisionsArchive={decisionsArchive} />
@@ -2244,6 +2424,9 @@ export default function App() {
                     { key: 'drive', label: 'DRIVE', icon: Folder },
                     { key: 'sheets', label: 'SHEETS', icon: FileSpreadsheet },
                     { key: 'keep', label: 'KEEP', icon: BookOpen },
+                    { key: 'tasks', label: 'TASKS', icon: CheckSquare },
+                    { key: 'slides', label: 'SLIDES', icon: FileText },
+                    { key: 'docs', label: 'DOCS', icon: FileText },
                     { key: 'forms', label: 'FORMS', icon: FileText }
                   ] as const).map((tab) => {
                     const IconComp = tab.icon;
@@ -2310,13 +2493,23 @@ export default function App() {
                         decisionsArchive={decisionsArchive}
                       />
                     </div>
-                    <div className="md:col-span-2 lg:col-span-3">
-                      <GoogleFormsIntegration
-                        user={user}
-                        formsToken={gmailToken}
-                        onTokenUpdate={setGmailToken}
-                      />
-                    </div>
+                    <GoogleFormsIntegration
+                      user={user}
+                      formsToken={gmailToken}
+                      onTokenUpdate={setGmailToken}
+                    />
+                    <GoogleTasksIntegration
+                      user={user}
+                      tasksToken={gmailToken}
+                    />
+                    <GoogleSlidesIntegration
+                      user={user}
+                      slidesToken={gmailToken}
+                    />
+                    <GoogleDocsIntegration
+                      user={user}
+                      docsToken={gmailToken}
+                    />
                   </motion.div>
                 ) : (
                   <motion.div
@@ -2373,6 +2566,24 @@ export default function App() {
                         onTokenUpdate={setGmailToken}
                       />
                     )}
+                    {workspaceTab === 'tasks' && (
+                      <GoogleTasksIntegration
+                        user={user}
+                        tasksToken={gmailToken}
+                      />
+                    )}
+                    {workspaceTab === 'slides' && (
+                      <GoogleSlidesIntegration
+                        user={user}
+                        slidesToken={gmailToken}
+                      />
+                    )}
+                    {workspaceTab === 'docs' && (
+                      <GoogleDocsIntegration
+                        user={user}
+                        docsToken={gmailToken}
+                      />
+                    )}
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -2402,6 +2613,35 @@ export default function App() {
               className="w-full flex flex-col"
             >
               <ArgusMarketingCampaign />
+            </motion.div>
+          )}
+
+          {activeMainTab === 'aikido' && (
+            <motion.div
+              key="aikido-tab-content"
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -15 }}
+              transition={{ duration: 0.2 }}
+              className="w-full flex flex-col"
+            >
+              <AikidoDashboard />
+            </motion.div>
+          )}
+
+          {activeMainTab === 'assistant' && (
+            <motion.div
+              key="assistant-tab-content"
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -15 }}
+              transition={{ duration: 0.2 }}
+              className="max-w-7xl w-full mx-auto p-4 md:p-6"
+            >
+              <PersonalAssistantDashboard 
+                gmailToken={gmailToken} 
+                onAuthRequest={handleAppLogin} 
+              />
             </motion.div>
           )}
         </AnimatePresence>

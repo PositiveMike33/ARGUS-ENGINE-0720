@@ -95,6 +95,7 @@ export interface ToTAnalysisResult {
   branches: ToTBranch[];
   cached: boolean;
   durationMs: number;
+  model?: string;
   cctvParsing?: string;
   cctvIdentification?: string;
   cctvJudgment?: string;

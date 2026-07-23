@@ -16,10 +16,16 @@ export const createPool = () => {
 const pool = createPool();
 
 // Prevent unhandled pool-level errors from crashing the application
-pool.on('error', (err) => {
-  console.error('Unexpected error on idle SQL pool client:', err);
+pool.on('error', (err: any) => {
+  // Cloud SQL or pg drops idle connections occasionally. We can safely ignore these.
+  if (err.message && err.message.includes('Connection terminated unexpectedly')) {
+    // Silently ignore idle connection drops
+    return;
+  }
+  console.error('Unexpected error on idle SQL pool client:', err.message || err);
 });
 
 // Initialize Drizzle with the pool and schema (using explicit ESM path extension)
 export const db = drizzle(pool, { schema });
+
 export { schema };
