@@ -5,6 +5,18 @@
 
 export type FeedType = 'STM' | 'AVIATION' | 'MARITIME' | 'CCTV';
 
+export interface SseEventItem {
+  id: string;
+  type: 'telemetry_update' | 'alert_critical';
+  title: string;
+  source: string;
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  timestamp: string;
+  value?: string;
+  details?: string;
+  receivedAt: Date;
+}
+
 export interface FeedItem {
   id: string;
   type: FeedType;

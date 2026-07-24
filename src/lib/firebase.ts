@@ -5,7 +5,7 @@
 
 import { initializeApp } from 'firebase/app';
 import { getAuth, setPersistence, browserLocalPersistence, GoogleAuthProvider, signInWithPopup, signOut, User } from 'firebase/auth';
-import { initializeFirestore, persistentLocalCache, persistentSingleTabManager, getFirestore, doc, getDocFromServer } from 'firebase/firestore';
+import { initializeFirestore, persistentLocalCache, persistentSingleTabManager, getFirestore, doc, getDoc } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json' with { type: 'json' };
 
 const app = initializeApp(firebaseConfig);
@@ -16,7 +16,8 @@ try {
   firestoreDb = initializeFirestore(app, {
     localCache: persistentLocalCache({
       tabManager: persistentSingleTabManager({}),
-    })
+    }),
+    experimentalAutoDetectLongPolling: true,
   }, dbId);
 } catch (e) {
   console.info("Info: Falling back to standard getFirestore initializer", e);
@@ -35,12 +36,12 @@ setPersistence(auth, browserLocalPersistence)
     console.error("Failed to configure Firebase auth persistence:", error);
   });
 
-// Test connection on boot (Non-blocking verification)
+// Test connection on boot (Non-blocking verification from cache/server)
 async function testConnection() {
   try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
+    await getDoc(doc(db, 'test', 'connection'));
   } catch (error) {
-    // Les erreurs de connexion ou de permissions au tout début sont attendues tant que l'utilisateur n'est pas connecté
+    // Les erreurs de connexion ou de permissions au tout début sont attendues
     console.info("Info: Initialisation asynchrone de la connexion Firebase.");
   }
 }
